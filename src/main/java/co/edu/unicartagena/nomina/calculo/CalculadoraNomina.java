@@ -1,60 +1,82 @@
 package co.edu.unicartagena.nomina.calculo;
 
+import co.edu.unicartagena.nomina.calculo.beneficio.BeneficioAdicional;
+import co.edu.unicartagena.nomina.calculo.deduccion.Deduccion;
 import co.edu.unicartagena.nomina.calculo.liquidacion.BeneficioLiquidado;
 import co.edu.unicartagena.nomina.calculo.liquidacion.LiquidacionNomina;
-import co.edu.unicartagena.nomina.calculo.liquidacion.ModalidadBeneficio;
 import co.edu.unicartagena.nomina.dominio.comun.ConceptoNomina;
-import co.edu.unicartagena.nomina.dominio.comun.Dinero;
 import co.edu.unicartagena.nomina.dominio.comun.ValidacionNominaException;
+import co.edu.unicartagena.nomina.dominio.comun.Validaciones;
 import co.edu.unicartagena.nomina.dominio.empleado.Empleado;
-import co.edu.unicartagena.nomina.dominio.empleado.EmpleadoAsalariado;
-import co.edu.unicartagena.nomina.dominio.empleado.EmpleadoPorComision;
-import co.edu.unicartagena.nomina.dominio.empleado.EmpleadoPorHoras;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Calcula la liquidación de nómina de un empleado.
+ * Orquesta el cálculo de la liquidación de nómina de un empleado.
  *
- * <p>Primera versión funcional: las deducciones y los beneficios se calculan
- * directamente en esta clase.</p>
+ * <p>No conoce ninguna regla concreta: recibe por constructor las
+ * deducciones y los beneficios que debe aplicar (inyección de dependencias).
+ * Depende solo de las abstracciones {@link Deduccion} y
+ * {@link BeneficioAdicional}, no de clases concretas (principio de inversión
+ * de dependencias), y no necesita modificarse cuando cambian o se agregan
+ * reglas (principio abierto/cerrado).</p>
  */
 public class CalculadoraNomina {
 
-    private static final BigDecimal TASA_SEGURIDAD_SOCIAL = new BigDecimal("0.04");
-    private static final BigDecimal BONO_ALIMENTACION = new BigDecimal("1000000");
-    private static final BigDecimal TASA_FONDO_AHORRO = new BigDecimal("0.02");
+    private final List<Deduccion> deducciones;
+    private final List<BeneficioAdicional> beneficios;
 
+    /**
+     * @param deducciones deducciones que se aplican a todos los empleados
+     * @param beneficios  beneficios adicionales que se evalúan para cada empleado
+     */
+    public CalculadoraNomina(List<Deduccion> deducciones, List<BeneficioAdicional> beneficios) {
+        this.deducciones = List.copyOf(Validaciones.requerirNoNulo(deducciones, "deducciones"));
+        this.beneficios = List.copyOf(Validaciones.requerirNoNulo(beneficios, "beneficios"));
+    }
+
+    /**
+     * Liquida la nómina de un empleado en un mes.
+     *
+     * @param empleado empleado a liquidar
+     * @param periodo  mes a liquidar; la fecha de corte es su último día
+     * @return comprobante de nómina
+     * @throws ValidacionNominaException si el contrato no está vigente o el neto es negativo
+     */
     public LiquidacionNomina liquidar(Empleado empleado, YearMonth periodo) {
-        LocalDate fechaCorte = periodo.atEndOfMonth();
-        if (!empleado.estaVigenteEn(fechaCorte)) {
-            throw new ValidacionNominaException(empleado.getNombre() + " no tiene contrato vigente en " + periodo + ".");
-        }
+        Validaciones.requerirNoNulo(empleado, "empleado");
+        LocalDate fechaCorte = Validaciones.requerirNoNulo(periodo, "periodo").atEndOfMonth();
+        validarVigencia(empleado, periodo, fechaCorte);
+
         List<ConceptoNomina> devengos = empleado.calcularDevengos(fechaCorte);
-        BigDecimal bruto = ConceptoNomina.sumar(devengos);
+        BigDecimal salarioBruto = ConceptoNomina.sumar(devengos);
 
-        List<ConceptoNomina> deducciones = new ArrayList<>();
-        deducciones.add(new ConceptoNomina("Seguro social y pensión (4 %)",
-                Dinero.porcentaje(bruto, TASA_SEGURIDAD_SOCIAL)));
-        deducciones.add(new ConceptoNomina("ARL",
-                Dinero.porcentaje(bruto, empleado.getNivelRiesgoArl().getTasa())));
+        return new LiquidacionNomina(empleado, periodo, devengos,
+                aplicarDeducciones(empleado, salarioBruto),
+                otorgarBeneficios(empleado, salarioBruto, fechaCorte));
+    }
 
-        List<BeneficioLiquidado> beneficios = new ArrayList<>();
-        if (empleado instanceof EmpleadoAsalariado || empleado instanceof EmpleadoPorComision) {
-            beneficios.add(new BeneficioLiquidado("Bono de alimentación",
-                    BONO_ALIMENTACION, ModalidadBeneficio.PAGO_AL_EMPLEADO));
+    private static void validarVigencia(Empleado empleado, YearMonth periodo, LocalDate fechaCorte) {
+        if (!empleado.estaVigenteEn(fechaCorte)) {
+            throw new ValidacionNominaException(
+                    empleado.getNombre() + " no tiene contrato vigente en " + periodo + ".");
         }
-        if (empleado instanceof EmpleadoPorHoras porHoras
-                && porHoras.aceptaFondoAhorro()
-                && porHoras.tieneAntiguedadMayorA(1, fechaCorte)) {
-            beneficios.add(new BeneficioLiquidado("Fondo de ahorro (2 %)",
-                    Dinero.porcentaje(bruto, TASA_FONDO_AHORRO), ModalidadBeneficio.DEPOSITO_FONDO_AHORRO));
-        }
+    }
 
-        return new LiquidacionNomina(empleado, periodo, devengos, deducciones, beneficios);
+    private List<ConceptoNomina> aplicarDeducciones(Empleado empleado, BigDecimal salarioBruto) {
+        return deducciones.stream()
+                .map(deduccion -> deduccion.calcular(empleado, salarioBruto))
+                .toList();
+    }
+
+    private List<BeneficioLiquidado> otorgarBeneficios(Empleado empleado, BigDecimal salarioBruto,
+                                                       LocalDate fechaCorte) {
+        return beneficios.stream()
+                .filter(beneficio -> beneficio.aplicaA(empleado, fechaCorte))
+                .map(beneficio -> beneficio.calcular(empleado, salarioBruto))
+                .toList();
     }
 }

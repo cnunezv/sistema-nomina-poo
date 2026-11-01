@@ -31,7 +31,7 @@ class CalculadoraNominaTest {
 
     @BeforeEach
     void prepararCalculadora() {
-        calculadora = new CalculadoraNomina();
+        calculadora = ConfiguracionNomina.crearCalculadoraEstandar();
     }
 
     private static EmpleadoPorHoras porHoras(LocalDate ingreso, boolean aceptaFondo) {
