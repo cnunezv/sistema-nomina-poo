@@ -35,7 +35,7 @@ class DeduccionesTest {
         ConceptoNomina concepto = new Arl().calcular(empleadoConRiesgo(NivelRiesgoArl.CLASE_I), Dinero.de("2000000"));
 
         assertEquals(Dinero.de("10440"), concepto.valor());
-        assertEquals("ARL clase I (0.522 %)", concepto.descripcion());
+        assertEquals("ARL clase I (0,522 %)", concepto.descripcion());
     }
 
     @Test

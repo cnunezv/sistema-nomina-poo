@@ -18,8 +18,16 @@ public class Arl implements Deduccion {
     @Override
     public ConceptoNomina calcular(Empleado empleado, BigDecimal salarioBruto) {
         NivelRiesgoArl nivel = empleado.getNivelRiesgoArl();
-        String descripcion = "ARL clase " + nivel.name().replace("CLASE_", "")
-                + " (" + nivel.getTasa().movePointRight(2).stripTrailingZeros().toPlainString() + " %)";
-        return new ConceptoNomina(descripcion, Dinero.porcentaje(salarioBruto, nivel.getTasa()));
+        return new ConceptoNomina(describir(nivel), Dinero.porcentaje(salarioBruto, nivel.getTasa()));
+    }
+
+    /**
+     * @param nivel clase de riesgo
+     * @return por ejemplo {@code "ARL clase I (0,522 %)"}
+     */
+    private static String describir(NivelRiesgoArl nivel) {
+        String clase = nivel.name().replace("CLASE_", "");
+        String porcentaje = nivel.getTasa().movePointRight(2).stripTrailingZeros().toPlainString().replace('.', ',');
+        return "ARL clase " + clase + " (" + porcentaje + " %)";
     }
 }
